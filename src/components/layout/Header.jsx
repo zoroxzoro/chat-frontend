@@ -29,6 +29,7 @@ import {
   setIsSearch,
 } from "../../../redux/reducer/mics";
 import { server } from "../constants/config";
+import { resetNotificationCount } from "../../../redux/reducer/chat";
 
 const SearchDialog = lazy(() => import("../../Specific/Search"));
 const Notification = lazy(() => import("../../Specific/Notification"));
@@ -37,6 +38,7 @@ const NewGroup = lazy(() => import("../../Specific/NewGroup"));
 const Header = () => {
   const navigate = useNavigate();
   const { isSearch, isNotification } = useSelector((state) => state.misc);
+  const { notificationCount } = useSelector((state) => state.chat);
 
   const [isNewGroup, setIsNewGroup] = useState(false);
   const dispatch = useDispatch();
@@ -62,6 +64,7 @@ const Header = () => {
 
   const openNotification = () => {
     dispatch(setIsNotification(true));
+    dispatch(resetNotificationCount());
   };
 
   const closeNotification = () => {
@@ -146,7 +149,7 @@ const Header = () => {
                 title={"Notifications"}
                 icon={<NotificationsIcon />}
                 onClick={openNotification}
-                value={0} // Provide the actual value for notifications badge
+                value={notificationCount} // Provide the actual value for notifications badge
               />
 
               <IconBtn

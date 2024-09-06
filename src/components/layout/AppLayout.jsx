@@ -4,13 +4,20 @@ import { useDispatch, useSelector } from "react-redux";
 import { useParams } from "react-router-dom";
 import { useMyChatsQuery } from "../../../redux/api/api";
 import { setIsMobile } from "../../../redux/reducer/mics";
-import { useErrors } from "../../Hooks/hook";
+import { useErrors, useSocketEvents } from "../../Hooks/hook";
 import ChatList from "../../Specific/ChatList";
 import ProfileCard from "../../Specific/ProfileCard";
 import bg from "../../assets/bg1-removebg-preview-transformed.png";
 import Title from "../shared/title";
 import Header from "./Header";
 import { getSocket } from "../../../socket";
+import { NEW_MESSAGES_ALERT, NEW_REQUEST } from "../constants/event";
+import { useCallback, useEffect } from "react";
+import {
+  incrementNotification,
+  setNewMessagesAlert,
+} from "../../../redux/reducer/chat";
+import { getOrSaveFromStorage } from "../../lib/features";
 
 export const AppLayout = (WrappedComponent) => {
   const AppLayoutComponent = (props) => {
@@ -21,13 +28,40 @@ export const AppLayout = (WrappedComponent) => {
     const { user } = useSelector((state) => state.auth);
     const { isError, isLoading, data, error, refetch } = useMyChatsQuery();
     const socket = getSocket();
+    const { newMessagesAlert } = useSelector((state) => state.chat);
 
     console.log("Chat ID from params:", chatId); // Check if chatId is correctly logged
     console.log("Socket ID:", socket.id);
 
     useErrors([{ isError, error, fallback: () => refetch() }]);
 
+    useEffect(() => {
+      getOrSaveFromStorage({
+        key: NEW_MESSAGES_ALERT,
+        value: newMessagesAlert,
+      });
+    }, [newMessagesAlert]);
+
     const handleMobileClose = () => dispatch(setIsMobile(false));
+
+    const newMessageAlertListener = useCallback(
+      (data) => {
+        if (data.chatId === chatId) return;
+        dispatch(setNewMessagesAlert(data));
+      },
+      [chatId]
+    );
+
+    const newRequestListener = useCallback(() => {
+      dispatch(incrementNotification());
+    }, [dispatch]);
+
+    const eventHandlers = {
+      [NEW_MESSAGES_ALERT]: newMessageAlertListener,
+      [NEW_REQUEST]: newRequestListener,
+    };
+
+    useSocketEvents(socket, eventHandlers);
 
     return (
       <div
@@ -54,7 +88,12 @@ export const AppLayout = (WrappedComponent) => {
               },
             }}
           >
-            <ChatList w="70vw" chats={data?.chats} chatId={chatId} />
+            <ChatList
+              w="70vw"
+              chats={data?.chats}
+              chatId={chatId}
+              newMessagesAlert={newMessagesAlert}
+            />
           </Drawer>
         )}
         <div style={{ height: "calc(100vh - 4rem)" }}>
@@ -68,7 +107,14 @@ export const AppLayout = (WrappedComponent) => {
               }}
               height={"100%"}
             >
-              {isLoading ? <Skeleton /> : <ChatList chats={data?.chats} />}
+              {isLoading ? (
+                <Skeleton />
+              ) : (
+                <ChatList
+                  chats={data?.chats}
+                  newMessagesAlert={newMessagesAlert}
+                />
+              )}
             </Grid>
             <Grid
               item

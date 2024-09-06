@@ -2,17 +2,24 @@ import { useInfiniteScrollTop } from "6pp";
 import { AttachFile, Send } from "@mui/icons-material";
 import { IconButton, Stack } from "@mui/material";
 import PropTypes from "prop-types";
-import { Fragment, useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useDispatch } from "react-redux";
 import { useChatDetailesQuery, useGetMessagesQuery } from "../../redux/api/api";
+import { setIsFileMenu } from "../../redux/reducer/mics";
 import { getSocket } from "../../socket";
-import { NEW_MESSAGES } from "../components/constants/event";
+import {
+  NEW_ATTACHMENTS,
+  NEW_MESSAGES,
+  START_TYPING,
+  STOP_TYPING,
+} from "../components/constants/event"; // Ensure NEW_ATTACHMENT is correctly defined
 import FileMenu from "../components/dialog/FileMenu";
 import { AppLayout } from "../components/layout/AppLayout";
 import MessageComp from "../components/shared/MessageComp";
 import { InputBox } from "../components/styles/Styled";
 import { useErrors, useSocketEvents } from "../Hooks/hook";
-import { useDispatch } from "react-redux";
-import { setIsFileMenu } from "../../redux/reducer/mics";
+import { removeNewMessagesAlert } from "../../redux/reducer/chat";
+import { TypingLoader } from "../components/layout/Loader";
 
 const Chats = ({ chatId, user }) => {
   const containerRef = useRef(null);
@@ -22,7 +29,12 @@ const Chats = ({ chatId, user }) => {
   const [messages, setMessages] = useState([]);
   const [page, setPage] = useState(1);
   const [fileMenuAnchorEl, setFileMenuAnchorEl] = useState(null);
+  const [IamTyping, setIamTyping] = useState(false);
+  const [userTyping, setUserTyping] = useState(null);
+  const typingTimeout = useRef(null);
   const dispatch = useDispatch();
+  const bottomRef = useRef(null);
+
   const handleAttachClick = (e) => {
     e.preventDefault();
     dispatch(setIsFileMenu(true));
@@ -32,18 +44,29 @@ const Chats = ({ chatId, user }) => {
     setFileMenuAnchorEl(null);
   };
 
-  const sumbitHandler = (e) => {
+  const submitHandler = (e) => {
     e.preventDefault();
-    console.log(message);
     if (!message.trim()) return;
     socket.emit(NEW_MESSAGES, { chatId: chatId, members, message });
     setMessage("");
   };
-  console.log("chatId", chatId);
-  const newMessageHandler = useCallback((data) => {
-    setMessages((prev) => [...prev, data.message]);
-  }, []);
-  const eventHandler = { [NEW_MESSAGES]: newMessageHandler };
+
+  const newMessagesListener = useCallback(
+    (data) => {
+      if (data.chatId !== chatId) return;
+
+      setMessages((prev) => [...prev, data.message]);
+    },
+    [chatId]
+  );
+
+  const newAttachmentHandler = useCallback(
+    (data) => {
+      if (data.chatId !== chatId) return;
+      setMessages((prev) => [...prev, data.attachment]);
+    },
+    [chatId]
+  );
 
   const chatDetailes = useChatDetailesQuery({ chatId: chatId, skip: !chatId });
   const members = chatDetailes.data?.chat?.members;
@@ -57,8 +80,8 @@ const Chats = ({ chatId, user }) => {
     { isError: oldMessagesChunk.error, error: oldMessagesChunk.error },
   ];
 
-  useSocketEvents(socket, eventHandler);
   useErrors(errors);
+
   const { data: oldMessages, setData: setOldMessages } = useInfiniteScrollTop(
     containerRef,
     oldMessagesChunk.data?.totalPages,
@@ -66,7 +89,58 @@ const Chats = ({ chatId, user }) => {
     setPage,
     oldMessagesChunk.data?.messages
   );
-  const allMessages = [...(oldMessages.data?.messages || []), ...messages];
+
+  useEffect(() => {
+    return () => {
+      dispatch(removeNewMessagesAlert(chatId));
+      setMessages([]);
+      setMessage("");
+      setPage(1);
+      setOldMessages([]);
+    };
+  }, [chatId]);
+
+  const messageOnChange = (e) => {
+    setMessage(e.target.value);
+
+    if (!IamTyping) {
+      socket.emit(START_TYPING, { members, chatId });
+      setIamTyping(true);
+    }
+
+    if (typingTimeout.current) clearTimeout(typingTimeout.current);
+
+    typingTimeout.current = setTimeout(() => {
+      socket.emit(STOP_TYPING, { members, chatId });
+      setIamTyping(false);
+    }, [2000]);
+  };
+
+  const startTypingListener = useCallback(
+    (data) => {
+      if (data.chatId !== chatId) return;
+
+      setUserTyping(true);
+    },
+    [chatId]
+  );
+
+  const stopTypingListener = useCallback(
+    (data) => {
+      if (data.chatId !== chatId) return;
+      setUserTyping(false);
+    },
+    [chatId]
+  );
+  // Combine old messages with new messages
+  const allMessages = [...(oldMessages || []), ...messages];
+  const eventHandler = {
+    [NEW_MESSAGES]: newMessagesListener,
+    [NEW_ATTACHMENTS]: newAttachmentHandler, // Listen for new attachments
+    [START_TYPING]: startTypingListener,
+    [STOP_TYPING]: stopTypingListener,
+  };
+  useSocketEvents(socket, eventHandler);
   return (
     <Fragment>
       <Stack
@@ -92,9 +166,12 @@ const Chats = ({ chatId, user }) => {
           overflowY: "auto",
         }}
       >
-        {oldMessages.map((i) => (
-          <MessageComp message={i} User={user} key={i._id} />
+        {allMessages.map((msg) => (
+          <MessageComp message={msg} User={user} key={msg._id || msg.id} />
         ))}
+        {userTyping && <TypingLoader />}
+
+        <div ref={bottomRef} />
       </Stack>
 
       <form
@@ -108,7 +185,7 @@ const Chats = ({ chatId, user }) => {
           borderRadius: "12px",
           border: "1px solid rgba(209, 213, 219, 0.3)",
         }}
-        onSubmit={sumbitHandler}
+        onSubmit={submitHandler}
       >
         <Stack
           direction={"row"}
@@ -135,7 +212,7 @@ const Chats = ({ chatId, user }) => {
               },
             }}
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={messageOnChange}
           />
           <IconButton
             type="submit"
