@@ -167,7 +167,7 @@ const Chats = ({ chatId, user }) => {
         }}
       >
         {allMessages.map((msg) => (
-          <MessageComp message={msg} User={user} key={msg._id || msg.id} />
+          <MessageComp message={msg} User={user} key={msg._id} />
         ))}
         {userTyping && <TypingLoader />}
 
